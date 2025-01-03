@@ -999,6 +999,11 @@ Type& Type::operator=(const Type& rhs)
     return *this;
 }
 
+Type Type::clone() const
+{
+    return *this;
+}
+
 TypeId makeFunction(
     TypeArena& arena,
     std::optional<TypeId> selfType,
@@ -1030,6 +1035,7 @@ BuiltinTypes::BuiltinTypes()
     , unknownType(arena->addType(Type{UnknownType{}, /*persistent*/ true}))
     , neverType(arena->addType(Type{NeverType{}, /*persistent*/ true}))
     , errorType(arena->addType(Type{ErrorType{}, /*persistent*/ true}))
+    , noRefineType(arena->addType(Type{NoRefineType{}, /*persistent*/ true}))
     , falsyType(arena->addType(Type{UnionType{{falseType, nilType}}, /*persistent*/ true}))
     , truthyType(arena->addType(Type{NegationType{falsyType}, /*persistent*/ true}))
     , optionalNumberType(arena->addType(Type{UnionType{{numberType, nilType}}, /*persistent*/ true}))
@@ -1039,7 +1045,7 @@ BuiltinTypes::BuiltinTypes()
     , unknownTypePack(arena->addTypePack(TypePackVar{VariadicTypePack{unknownType}, /*persistent*/ true}))
     , neverTypePack(arena->addTypePack(TypePackVar{VariadicTypePack{neverType}, /*persistent*/ true}))
     , uninhabitableTypePack(arena->addTypePack(TypePackVar{TypePack{{neverType}, neverTypePack}, /*persistent*/ true}))
-    , errorTypePack(arena->addTypePack(TypePackVar{Unifiable::Error{}, /*persistent*/ true}))
+    , errorTypePack(arena->addTypePack(TypePackVar{ErrorTypePack{}, /*persistent*/ true}))
 {
     freeze(*arena);
 }

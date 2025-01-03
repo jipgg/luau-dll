@@ -18,10 +18,9 @@ using namespace Luau;
 LUAU_FASTFLAG(LuauSolverV2)
 LUAU_FASTFLAG(LuauInstantiateInSubtyping)
 LUAU_FASTFLAG(LuauFixIndexerSubtypingOrdering)
-LUAU_FASTFLAG(LuauAcceptIndexingTableUnionsIntersections)
-
-LUAU_DYNAMIC_FASTFLAG(LuauImproveNonFunctionCallError)
-LUAU_DYNAMIC_FASTINT(LuauTypeSolverRelease)
+LUAU_FASTFLAG(LuauRetrySubtypingWithoutHiddenPack)
+LUAU_FASTFLAG(LuauTableKeysAreRValues)
+LUAU_FASTFLAG(LuauAllowNilAssignmentToIndexer)
 
 TEST_SUITE_BEGIN("TableTests");
 
@@ -319,7 +318,7 @@ TEST_CASE_FIXTURE(Fixture, "call_method_with_explicit_self_argument")
 TEST_CASE_FIXTURE(Fixture, "used_dot_instead_of_colon")
 {
     // CLI-114792 Dot vs colon warnings aren't in the new solver yet.
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         local T = {}
@@ -372,7 +371,7 @@ TEST_CASE_FIXTURE(Fixture, "used_dot_instead_of_colon_but_correctly")
 TEST_CASE_FIXTURE(Fixture, "used_colon_instead_of_dot")
 {
     // CLI-114792 Dot vs colon warnings aren't in the new solver yet.
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         local T = {}
@@ -397,7 +396,7 @@ TEST_CASE_FIXTURE(Fixture, "used_colon_instead_of_dot")
 TEST_CASE_FIXTURE(Fixture, "open_table_unification_2")
 {
     // CLI-114792 We don't report MissingProperties in many places where the old solver does.
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         local a = {}
@@ -537,7 +536,7 @@ TEST_CASE_FIXTURE(Fixture, "table_param_width_subtyping_3")
 TEST_CASE_FIXTURE(Fixture, "table_unification_4")
 {
     // CLI-114134 - Use egraphs to simplify types better.
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         function foo(o)
@@ -568,7 +567,7 @@ TEST_CASE_FIXTURE(Fixture, "ok_to_add_property_to_free_table")
 TEST_CASE_FIXTURE(Fixture, "okay_to_add_property_to_unsealed_tables_by_assignment")
 {
     // CLI-114872
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         --!strict
@@ -587,7 +586,7 @@ TEST_CASE_FIXTURE(Fixture, "okay_to_add_property_to_unsealed_tables_by_assignmen
 TEST_CASE_FIXTURE(Fixture, "okay_to_add_property_to_unsealed_tables_by_function_call")
 {
     // CLI-114873
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         --!strict
@@ -812,7 +811,7 @@ TEST_CASE_FIXTURE(Fixture, "infer_indexer_from_value_property_in_literal")
 TEST_CASE_FIXTURE(Fixture, "infer_indexer_from_its_variable_type_and_unifiable")
 {
     // This code is totally different in the new solver.  We instead create a new type state for t2.
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         local t1: { [string]: string } = {}
@@ -894,7 +893,7 @@ TEST_CASE_FIXTURE(Fixture, "sealed_table_value_can_infer_an_indexer")
 
 TEST_CASE_FIXTURE(Fixture, "array_factory_function")
 {
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         function empty() return {} end
@@ -931,7 +930,7 @@ TEST_CASE_FIXTURE(Fixture, "indexer_on_sealed_table_must_unify_with_free_table")
     // CLI-114134 What should be happening here is that the type of `t` should
     // be reduced from `{number} & {string}` to `never`, but that's not
     // happening.
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         function F(t): {number}
@@ -994,7 +993,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "indexing_from_a_table_should_prefer_properti
 
 TEST_CASE_FIXTURE(Fixture, "any_when_indexing_into_an_unsealed_table_with_no_indexer_in_nonstrict_mode")
 {
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         --!nonstrict
@@ -1146,7 +1145,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "meta_add_inferred")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "meta_add_both_ways")
 {
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         type VectorMt = { __add: (Vector, number) -> Vector }
@@ -1524,7 +1523,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "found_multiple_like_keys")
 TEST_CASE_FIXTURE(BuiltinsFixture, "dont_suggest_exact_match_keys")
 {
     // CLI-114977 Unsealed table writes don't account for order properly
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         local t = {}
@@ -1567,7 +1566,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "getmetatable_returns_pointer_to_metatable")
 TEST_CASE_FIXTURE(BuiltinsFixture, "metatable_mismatch_should_fail")
 {
     // This test is invalid because we now create a new type state for t1 at the assignment.
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         local t1 = {x = 1}
@@ -1611,7 +1610,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "property_lookup_through_tabletypevar_metatab
 TEST_CASE_FIXTURE(BuiltinsFixture, "missing_metatable_for_sealed_tables_do_not_get_inferred")
 {
     // This test is invalid because we now create a new type state for t at the assignment.
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         local t = {x = 1}
@@ -1666,7 +1665,7 @@ TEST_CASE_FIXTURE(Fixture, "right_table_missing_key")
 TEST_CASE_FIXTURE(Fixture, "right_table_missing_key2")
 {
     // CLI-114792 We don't report MissingProperties
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         function f(t: {}): { [string]: string, a: string }
@@ -1927,18 +1926,128 @@ TEST_CASE_FIXTURE(Fixture, "type_mismatch_on_massive_table_is_cut_short")
 
 TEST_CASE_FIXTURE(Fixture, "ok_to_set_nil_even_on_non_lvalue_base_expr")
 {
-    // CLI-100076 Assigning nil to an indexer should always succeed
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    ScopedFastFlag sffs[] = {{FFlag::LuauSolverV2, true}, {FFlag::LuauAllowNilAssignmentToIndexer, true}};
 
-    CheckResult result = check(R"(
+    LUAU_REQUIRE_NO_ERRORS(check(R"(
         local function f(): { [string]: number }
             return { ["foo"] = 1 }
         end
 
         f()["foo"] = nil
+    )"));
+
+    LUAU_REQUIRE_NO_ERRORS(check(R"(
+        local function f(
+            t: {known_prop: boolean, [string]: number}, 
+            key: string
+        )
+            t[key] = nil
+            t["hello"] = nil
+            t.undefined = nil
+        end
+    )"));
+
+    auto result = check(R"(
+        local function f(t: {known_prop: boolean, [string]: number, })
+            t.known_prop = nil
+        end
     )");
 
-    LUAU_REQUIRE_NO_ERRORS(result);
+    LUAU_REQUIRE_ERROR_COUNT(1, result);
+    CHECK_EQ(Location{{2, 27}, {2, 30}}, result.errors[0].location);
+    CHECK_EQ("Type 'nil' could not be converted into 'boolean'", toString(result.errors[0]));
+
+    loadDefinition(R"(
+        declare class FancyHashtable
+            [string]: number
+            real_property: string
+        end
+     )");
+
+    LUAU_REQUIRE_NO_ERRORS(check(R"(
+        local function removekey(fh: FancyHashtable, other_key: string)
+            fh["hmmm"] = nil
+            fh[other_key] = nil
+            fh.dne = nil
+        end
+    )"));
+
+    result = check(R"(
+        local function removekey(fh: FancyHashtable)
+            fh.real_property = nil
+        end
+    )");
+
+    LUAU_REQUIRE_ERROR_COUNT(1, result);
+    CHECK_EQ(result.errors[0].location, Location{{2, 31}, {2, 34}});
+    CHECK_EQ(toString(result.errors[0]), "Type 'nil' could not be converted into 'string'");
+}
+
+TEST_CASE_FIXTURE(Fixture, "ok_to_set_nil_on_generic_map")
+{
+
+    ScopedFastFlag sffs[] = {{FFlag::LuauSolverV2, true}, {FFlag::LuauAllowNilAssignmentToIndexer, true}};
+
+    LUAU_REQUIRE_NO_ERRORS(check(R"(
+        type MyMap<K, V> = { [K]: V }
+        function set<K, V>(m: MyMap<K, V>, k: K, v: V)
+            m[k] = v
+        end
+        function unset<K, V>(m: MyMap<K, V>, k: K)
+            m[k] = nil
+        end
+        local m: MyMap<string, boolean> = {}
+        set(m, "foo", true)
+        unset(m, "foo")
+    )"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "key_setting_inference_given_nil_upper_bound")
+{
+    ScopedFastFlag sffs[] = {{FFlag::LuauSolverV2, true}, {FFlag::LuauAllowNilAssignmentToIndexer, true}};
+
+    LUAU_REQUIRE_NO_ERRORS(check(R"(
+        local function setkey_object(t: { [string]: number }, v)
+            t.foo = v
+            t.foo = nil
+        end
+        local function setkey_constindex(t: { [string]: number }, v)
+            t["foo"] = v
+            t["foo"] = nil
+        end
+        local function setkey_unknown(t: { [string]: number }, k, v)
+            t[k] = v
+            t[k] = nil
+        end
+    )"));
+    CHECK_EQ(toString(requireType("setkey_object")), "({ [string]: number }, number) -> ()");
+    CHECK_EQ(toString(requireType("setkey_constindex")), "({ [string]: number }, number) -> ()");
+    CHECK_EQ(toString(requireType("setkey_unknown")), "({ [string]: number }, string, number) -> ()");
+
+    LUAU_REQUIRE_NO_ERRORS(check(R"(
+        local function on_number(v: number): () end
+        local function setkey_object(t: { [string]: number }, v)
+            t.foo = v
+            on_number(v)
+        end
+    )"));
+    CHECK_EQ(toString(requireType("setkey_object")), "({ [string]: number }, number) -> ()");
+}
+
+TEST_CASE_FIXTURE(Fixture, "explicit_nil_indexer")
+{
+
+    ScopedFastFlag _{FFlag::LuauSolverV2, true};
+
+    auto result = check(R"(
+        local function _(t: { [string]: number? }): number
+            return t.hello
+        end
+    )");
+
+    LUAU_REQUIRE_ERROR_COUNT(1, result);
+    CHECK_EQ(result.errors[0].location, Location{{2, 12}, {2, 26}});
+    CHECK(get<TypePackMismatch>(result.errors[0]));
 }
 
 TEST_CASE_FIXTURE(Fixture, "ok_to_provide_a_subtype_during_construction")
@@ -2097,7 +2206,7 @@ local Test: {Table} = {
 TEST_CASE_FIXTURE(Fixture, "common_table_element_general")
 {
     // CLI-115275 - Bidirectional inference does not always propagate indexer types into the expression
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         type Table = {
@@ -2219,7 +2328,7 @@ foo({
 TEST_CASE_FIXTURE(Fixture, "common_table_element_union_in_call_tail")
 {
     // CLI-115239 - Bidirectional checking does not work for __call metamethods
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         type Foo = {x: number | string}
@@ -2266,7 +2375,16 @@ TEST_CASE_FIXTURE(Fixture, "invariant_table_properties_means_instantiating_table
         local c : string = t.m("hi")
     )");
 
-    if (FFlag::LuauSolverV2)
+    if (FFlag::LuauSolverV2 && FFlag::LuauRetrySubtypingWithoutHiddenPack)
+    {
+        LUAU_REQUIRE_ERROR_COUNT(1, result);
+
+        CHECK(get<ExplicitFunctionAnnotationRecommended>(result.errors[0]));
+
+        // This is not actually the expected behavior, but the typemismatch we were seeing before was for the wrong reason.
+        // The behavior of this test is just regressed generally in the new solver, and will need to be consciously addressed.
+    }
+    else if (FFlag::LuauSolverV2)
     {
         LUAU_REQUIRE_ERROR_COUNT(2, result);
 
@@ -2407,7 +2525,7 @@ could not be converted into
         //
         // Second, nil <: unknown, so we consider that parameter to be optional.
         LUAU_REQUIRE_ERROR_COUNT(1, result);
-        CHECK("Type 'b1' could not be converted into 'a1'; at [read \"y\"], string is not exactly number" == toString(result.errors[0]));
+        CHECK("Type 'b1' could not be converted into 'a1'; at table()[read \"y\"], string is not exactly number" == toString(result.errors[0]));
     }
     else if (FFlag::LuauInstantiateInSubtyping)
     {
@@ -2505,7 +2623,7 @@ Type 'number' could not be converted into 'string' in an invariant context)";
 TEST_CASE_FIXTURE(Fixture, "explicitly_typed_table")
 {
     // Table properties like HasSuper.p must be invariant.  The new solver rightly rejects this program.
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
 --!strict
@@ -2555,7 +2673,7 @@ Table type '{ x: number, y: number }' not compatible with type 'Super' because t
 TEST_CASE_FIXTURE(Fixture, "explicitly_typed_table_with_indexer")
 {
     // CLI-114791 Bidirectional inference should be able to cause the inference engine to forget that a table literal has some property
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         --!strict
@@ -2573,7 +2691,7 @@ TEST_CASE_FIXTURE(Fixture, "explicitly_typed_table_with_indexer")
 TEST_CASE_FIXTURE(BuiltinsFixture, "recursive_metatable_type_call")
 {
     // CLI-114782
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
 local b
@@ -2583,10 +2701,7 @@ b()
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
 
-    if (DFFlag::LuauImproveNonFunctionCallError)
-        CHECK_EQ(toString(result.errors[0]), R"(Cannot call a value of type t1 where t1 = { @metatable { __call: t1 }, {  } })");
-    else
-        CHECK_EQ(toString(result.errors[0]), R"(Cannot call non-function t1 where t1 = { @metatable { __call: t1 }, {  } })");
+    CHECK_EQ(toString(result.errors[0]), R"(Cannot call a value of type t1 where t1 = { @metatable { __call: t1 }, {  } })");
 }
 
 TEST_CASE_FIXTURE(Fixture, "table_subtyping_shouldn't_add_optional_properties_to_sealed_tables")
@@ -2831,7 +2946,7 @@ TEST_CASE_FIXTURE(Fixture, "table_length")
 TEST_CASE_FIXTURE(Fixture, "nil_assign_doesnt_hit_indexer")
 {
     // CLI-100076 - Assigning a table key to `nil` in the presence of an indexer should always be permitted
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check("local a = {} a[0] = 7  a[0] = nil");
     LUAU_REQUIRE_ERROR_COUNT(0, result);
@@ -2839,17 +2954,20 @@ TEST_CASE_FIXTURE(Fixture, "nil_assign_doesnt_hit_indexer")
 
 TEST_CASE_FIXTURE(Fixture, "wrong_assign_does_hit_indexer")
 {
+    ScopedFastFlag sffs[] = {{FFlag::LuauSolverV2, true}, {FFlag::LuauAllowNilAssignmentToIndexer, true}};
+
     CheckResult result = check(R"(
         local a = {}
         a[0] = 7
         a[0] = 't'
+        a[0] = nil
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
     CHECK((Location{Position{3, 15}, Position{3, 18}}) == result.errors[0].location);
     TypeMismatch* tm = get<TypeMismatch>(result.errors[0]);
     REQUIRE(tm);
-    CHECK(tm->wantedType == builtinTypes->numberType);
+    CHECK_EQ("number?", toString(tm->wantedType));
     CHECK(tm->givenType == builtinTypes->stringType);
 }
 
@@ -3265,21 +3383,17 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "table_call_metamethod_must_be_callable")
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
 
-    if (!FFlag::LuauSolverV2)
+    if (FFlag::LuauSolverV2)
+    {
+        CHECK("Cannot call a value of type a" == toString(result.errors[0]));
+    }
+    else
     {
         TypeError e{
             Location{{5, 20}, {5, 21}},
             CannotCallNonFunction{builtinTypes->numberType},
         };
         CHECK(result.errors[0] == e);
-    }
-    else if (DFFlag::LuauImproveNonFunctionCallError)
-    {
-        CHECK("Cannot call a value of type a" == toString(result.errors[0]));
-    }
-    else
-    {
-        CHECK("Cannot call non-function a" == toString(result.errors[0]));
     }
 }
 
@@ -3304,7 +3418,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "table_call_metamethod_generic")
 TEST_CASE_FIXTURE(BuiltinsFixture, "table_simple_call")
 {
     // The new solver can see that this function is safe to oversaturate.
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         local a = setmetatable({ x = 2 }, {
@@ -3597,7 +3711,7 @@ local b = a.x
 TEST_CASE_FIXTURE(Fixture, "scalar_is_a_subtype_of_a_compatible_polymorphic_shape_type")
 {
     // CLI-115087 The new solver cannot infer that a table-like type is actually string
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         local function f(s)
@@ -3686,7 +3800,7 @@ Table type 'typeof(string)' not compatible with type 't1 where t1 = {- absolutel
 TEST_CASE_FIXTURE(Fixture, "a_free_shape_can_turn_into_a_scalar_if_it_is_compatible")
 {
     // CLI-115087 The new solver cannot infer that a table-like type is actually string
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         local function f(s): string
@@ -3741,7 +3855,7 @@ Table type 'typeof(string)' not compatible with type 't1 where t1 = {+ absolutel
 TEST_CASE_FIXTURE(BuiltinsFixture, "a_free_shape_can_turn_into_a_scalar_directly")
 {
     // We need egraphs to simplify the type of `out` here.  CLI-114134
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         local function stringByteList(str)
@@ -4239,9 +4353,7 @@ TEST_CASE_FIXTURE(Fixture, "identify_all_problematic_table_fields")
 
 TEST_CASE_FIXTURE(Fixture, "read_and_write_only_table_properties_are_unsupported")
 {
-    ScopedFastFlag sff[] = {
-        {FFlag::LuauSolverV2, false},
-    };
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         type W = {read x: number}
@@ -4378,7 +4490,7 @@ TEST_CASE_FIXTURE(Fixture, "write_annotations_are_unsupported_even_with_the_new_
 
 TEST_CASE_FIXTURE(Fixture, "read_and_write_only_table_properties_are_unsupported")
 {
-    ScopedFastFlag sff[] = {{FFlag::LuauSolverV2, false}};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         type W = {read x: number}
@@ -4402,7 +4514,7 @@ TEST_CASE_FIXTURE(Fixture, "read_and_write_only_table_properties_are_unsupported
 
 TEST_CASE_FIXTURE(Fixture, "read_ond_write_only_indexers_are_unsupported")
 {
-    ScopedFastFlag sff[] = {{FFlag::LuauSolverV2, false}};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         type T = {read [string]: number}
@@ -4802,8 +4914,6 @@ end
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "indexing_branching_table")
 {
-    ScopedFastFlag sff{FFlag::LuauAcceptIndexingTableUnionsIntersections, true};
-
     CheckResult result = check(R"(
         local test = if true then { "meow", "woof" } else { 4, 81 }
         local test2 = test[1]
@@ -4820,8 +4930,6 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "indexing_branching_table")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "indexing_branching_table2")
 {
-    ScopedFastFlag sff{FFlag::LuauAcceptIndexingTableUnionsIntersections, true};
-
     CheckResult result = check(R"(
         local test = if true then {} else {}
         local test2 = test[1]
@@ -4846,6 +4954,113 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "length_of_array_is_number")
             local numRanges: number = #ranges
             return numRanges
         end
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "subtyping_with_a_metatable_table_path")
+{
+    // Builtin functions have to be setup for the new solver
+    if (!FFlag::LuauSolverV2)
+        return;
+
+    CheckResult result = check(R"(
+        type self = {} & {}
+        type Class = typeof(setmetatable())
+        local function _(): Class
+            return setmetatable({}::self, {})
+        end
+    )");
+
+    LUAU_REQUIRE_ERROR_COUNT(1, result);
+    CHECK_EQ(
+        "Type pack '{ @metatable {  }, {  } & {  } }' could not be converted into 'Class'; at [0].metatable(), {  } is not a subtype of nil\n"
+        "\ttype { @metatable {  }, {  } & {  } }[0].table()[0] ({  }) is not a subtype of Class[0].table() (nil)\n"
+        "\ttype { @metatable {  }, {  } & {  } }[0].table()[1] ({  }) is not a subtype of Class[0].table() (nil)",
+        toString(result.errors[0])
+    );
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "metatable_union_type")
+{
+
+    ScopedFastFlag _{FFlag::LuauSolverV2, true};
+
+    // This will have one (legitimate) error but previously would crash.
+    auto result = check(R"(
+        local function set(key, value)
+            local Message = {}
+            function Message.new(message)
+                local self = message or {}
+                setmetatable(self, Message)
+                return self
+            end
+            local self = Message.new(nil)
+            self[key] = value
+        end
+    )");
+    LUAU_REQUIRE_ERROR_COUNT(1, result);
+    CHECK_EQ(
+        "Cannot add indexer to table '{ @metatable t1, (nil & ~(false?)) | {  } } where t1 = { new: <a>(a) -> { @metatable t1, (a & ~(false?)) | {  } } }'",
+        toString(result.errors[0])
+    );
+}
+
+TEST_CASE_FIXTURE(Fixture, "function_check_constraint_too_eager")
+{
+    ScopedFastFlag _{FFlag::LuauSolverV2, true};
+
+    // CLI-121540: All of these examples should have no errors.
+
+    LUAU_CHECK_ERROR_COUNT(3, check(R"(
+        local function doTheThing(_: { [string]: unknown }) end
+        doTheThing({
+            ['foo'] = 5,
+            ['bar'] = 'heyo',
+        })
+    )"));
+
+    LUAU_CHECK_ERROR_COUNT(1, check(R"(
+        type Input = { [string]: unknown }
+
+        local i : Input = {
+            [('%s'):format('3.14')]=5,
+            ['stringField']='Heyo'
+        }
+    )"));
+
+    // This example previously asserted due to eagerly mutating the underlying
+    // table type.
+    LUAU_CHECK_ERROR_COUNT(3, check(R"(
+        type Input = { [string]: unknown }
+
+        local function doTheThing(_: Input) end
+
+        doTheThing({
+            [('%s'):format('3.14')]=5,
+            ['stringField']='Heyo'
+        })
+    )"));
+}
+
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "read_only_property_reads")
+{
+    ScopedFastFlag newSolver{FFlag::LuauSolverV2, true};
+    ScopedFastFlag sff{FFlag::LuauTableKeysAreRValues, true};
+
+    // none of the `t.id` accesses here should error
+    auto result = check(R"(
+        --!strict
+        type readonlyTable = {read id: number}
+        local t:readonlyTable = {id = 1}
+
+        local _:{number} = {[t.id] = 1}
+        local _:{number} = {[t.id::number] = 1}
+
+        local arr:{number} = {}
+        arr[t.id] = 1
     )");
 
     LUAU_REQUIRE_NO_ERRORS(result);

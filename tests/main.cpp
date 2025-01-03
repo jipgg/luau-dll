@@ -28,6 +28,7 @@
 #endif
 
 #include <optional>
+
 #include <stdio.h>
 
 // Indicates if verbose output is enabled; can be overridden via --verbose

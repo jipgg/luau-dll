@@ -8,7 +8,9 @@
 #include "doctest.h"
 
 LUAU_FASTFLAG(LuauSolverV2)
-LUAU_FASTFLAG(LuauUseNormalizeIntersectionLimit)
+LUAU_FASTFLAG(DebugLuauEqSatSimplification)
+LUAU_FASTFLAG(InferGlobalTypes)
+LUAU_FASTFLAG(LuauGeneralizationRemoveRecursiveUpperBound)
 
 using namespace Luau;
 
@@ -489,8 +491,15 @@ TEST_CASE_FIXTURE(Fixture, "truthy_constraint_on_properties")
 
     if (FFlag::LuauSolverV2)
     {
-        // CLI-115281 - Types produced by refinements don't always get simplified
-        CHECK("{ x: number? } & { x: ~(false?) }" == toString(requireTypeAtPosition({4, 23})));
+        if (FFlag::DebugLuauEqSatSimplification)
+        {
+            CHECK("{ x: number }" == toString(requireTypeAtPosition({4, 23})));
+        }
+        else
+        {
+            // CLI-115281 - Types produced by refinements don't always get simplified
+            CHECK("{ x: number? } & { x: ~(false?) }" == toString(requireTypeAtPosition({4, 23})));
+        }
         CHECK("number" == toString(requireTypeAtPosition({5, 26})));
     }
 
@@ -1376,7 +1385,7 @@ TEST_CASE_FIXTURE(RefinementClassFixture, "discriminate_from_isa_of_x")
 TEST_CASE_FIXTURE(RefinementClassFixture, "typeguard_cast_free_table_to_vector")
 {
     // CLI-115286 - Refining via type(x) == 'vector' does not work in the new solver
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         local function f(vec)
@@ -1570,7 +1579,7 @@ TEST_CASE_FIXTURE(RefinementClassFixture, "isa_type_refinement_must_be_known_ahe
 {
     // CLI-115087 - The new solver does not consistently combine tables with
     // class types when they appear in the upper bounds of a free type.
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         local function f(x): Instance
@@ -1858,6 +1867,8 @@ TEST_CASE_FIXTURE(RefinementClassFixture, "refine_a_param_that_got_resolved_duri
 
 TEST_CASE_FIXTURE(Fixture, "refine_a_property_of_some_global")
 {
+    ScopedFastFlag sff{FFlag::InferGlobalTypes, true};
+
     CheckResult result = check(R"(
         foo = { bar = 5 :: number? }
 
@@ -1868,9 +1879,8 @@ TEST_CASE_FIXTURE(Fixture, "refine_a_property_of_some_global")
 
     if (FFlag::LuauSolverV2)
     {
-        LUAU_REQUIRE_ERROR_COUNT(3, result);
-
-        CHECK_EQ("*error-type* | buffer | class | function | number | string | table | thread | true", toString(requireTypeAtPosition({4, 30})));
+        LUAU_REQUIRE_ERROR_COUNT(1, result);
+        CHECK_EQ("number", toString(requireTypeAtPosition({4, 30})));
     }
 }
 
@@ -2050,10 +2060,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "refinements_should_preserve_error_suppressio
         end
     )");
 
-    if (FFlag::LuauSolverV2)
-        LUAU_REQUIRE_NO_ERRORS(result);
-    else
-        LUAU_REQUIRE_NO_ERRORS(result);
+    LUAU_REQUIRE_NO_ERRORS(result);
 }
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "many_refinements_on_val")
@@ -2267,37 +2274,37 @@ TEST_CASE_FIXTURE(Fixture, "more_complex_long_disjunction_of_refinements_shouldn
 {
     CHECK_NOTHROW(check(R"(
 script:connect(function(obj)
-	if script.Parent.SeatNumber.Value == "1D" or 
-    script.Parent.SeatNumber.Value == "2D" or 
-    script.Parent.SeatNumber.Value == "3D" or 
-    script.Parent.SeatNumber.Value == "4D" or 
-    script.Parent.SeatNumber.Value == "5D" or 
-    script.Parent.SeatNumber.Value == "6D" or 
-    script.Parent.SeatNumber.Value == "7D" or 
-    script.Parent.SeatNumber.Value == "8D" or 
-    script.Parent.SeatNumber.Value == "9D" or 
-    script.Parent.SeatNumber.Value == "10D" or 
-    script.Parent.SeatNumber.Value == "11D" or 
-    script.Parent.SeatNumber.Value == "12D" or 
-    script.Parent.SeatNumber.Value == "13D" or 
-    script.Parent.SeatNumber.Value == "14D" or 
-    script.Parent.SeatNumber.Value == "15D" or 
-    script.Parent.SeatNumber.Value == "16D" or 
-    script.Parent.SeatNumber.Value == "1C" or 
-    script.Parent.SeatNumber.Value == "2C" or 
-    script.Parent.SeatNumber.Value == "3C" or 
-    script.Parent.SeatNumber.Value == "4C" or 
-    script.Parent.SeatNumber.Value == "5C" or 
-    script.Parent.SeatNumber.Value == "6C" or 
-    script.Parent.SeatNumber.Value == "7C" or 
-    script.Parent.SeatNumber.Value == "8C" or 
-    script.Parent.SeatNumber.Value == "9C" or 
-    script.Parent.SeatNumber.Value == "10C" or 
-    script.Parent.SeatNumber.Value == "11C" or 
-    script.Parent.SeatNumber.Value == "12C" or 
-    script.Parent.SeatNumber.Value == "13C" or 
-    script.Parent.SeatNumber.Value == "14C" or 
-    script.Parent.SeatNumber.Value == "15C" or 
+	if script.Parent.SeatNumber.Value == "1D" or
+    script.Parent.SeatNumber.Value == "2D" or
+    script.Parent.SeatNumber.Value == "3D" or
+    script.Parent.SeatNumber.Value == "4D" or
+    script.Parent.SeatNumber.Value == "5D" or
+    script.Parent.SeatNumber.Value == "6D" or
+    script.Parent.SeatNumber.Value == "7D" or
+    script.Parent.SeatNumber.Value == "8D" or
+    script.Parent.SeatNumber.Value == "9D" or
+    script.Parent.SeatNumber.Value == "10D" or
+    script.Parent.SeatNumber.Value == "11D" or
+    script.Parent.SeatNumber.Value == "12D" or
+    script.Parent.SeatNumber.Value == "13D" or
+    script.Parent.SeatNumber.Value == "14D" or
+    script.Parent.SeatNumber.Value == "15D" or
+    script.Parent.SeatNumber.Value == "16D" or
+    script.Parent.SeatNumber.Value == "1C" or
+    script.Parent.SeatNumber.Value == "2C" or
+    script.Parent.SeatNumber.Value == "3C" or
+    script.Parent.SeatNumber.Value == "4C" or
+    script.Parent.SeatNumber.Value == "5C" or
+    script.Parent.SeatNumber.Value == "6C" or
+    script.Parent.SeatNumber.Value == "7C" or
+    script.Parent.SeatNumber.Value == "8C" or
+    script.Parent.SeatNumber.Value == "9C" or
+    script.Parent.SeatNumber.Value == "10C" or
+    script.Parent.SeatNumber.Value == "11C" or
+    script.Parent.SeatNumber.Value == "12C" or
+    script.Parent.SeatNumber.Value == "13C" or
+    script.Parent.SeatNumber.Value == "14C" or
+    script.Parent.SeatNumber.Value == "15C" or
     script.Parent.SeatNumber.Value == "16C" then
     end)
 )"));
@@ -2327,8 +2334,6 @@ end)
 
 TEST_CASE_FIXTURE(Fixture, "refinements_table_intersection_limits" * doctest::timeout(0.5))
 {
-    ScopedFastFlag LuauUseNormalizeIntersectionLimit{FFlag::LuauUseNormalizeIntersectionLimit, true};
-
     CheckResult result = check(R"(
 --!strict
 type Dir = {
@@ -2369,6 +2374,78 @@ local function test(dirs: {Dir})
     end
 end
     )");
+}
+
+TEST_CASE_FIXTURE(RefinementClassFixture, "typeof_instance_refinement")
+{
+    CheckResult result = check(R"(
+        local function f(x: Instance | Vector3)
+            if typeof(x) == "Instance" then
+                local foo = x
+            else
+                local foo = x
+            end
+        end
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+
+    CHECK_EQ("Instance", toString(requireTypeAtPosition({3, 28})));
+    CHECK_EQ("Vector3", toString(requireTypeAtPosition({5, 28})));
+}
+
+TEST_CASE_FIXTURE(RefinementClassFixture, "typeof_instance_error")
+{
+    CheckResult result = check(R"(
+        local function f(x: Part)
+            if typeof(x) == "Instance" then
+                local foo : Folder = x
+            end
+        end
+    )");
+
+    LUAU_REQUIRE_ERROR_COUNT(1, result);
+}
+
+TEST_CASE_FIXTURE(RefinementClassFixture, "typeof_instance_isa_refinement")
+{
+    CheckResult result = check(R"(
+        local function f(x: Part | Folder | string)
+            if typeof(x) == "Instance" then
+                local foo = x
+                if foo:IsA("Folder") then
+                    local bar = foo
+                end
+            else
+                local foo = x
+            end
+        end
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+
+    CHECK_EQ("Folder | Part", toString(requireTypeAtPosition({3, 28})));
+    CHECK_EQ("Folder", toString(requireTypeAtPosition({5, 32})));
+    CHECK_EQ("string", toString(requireTypeAtPosition({8, 28})));
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "remove_recursive_upper_bound_when_generalizing")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::LuauSolverV2, true},
+        {FFlag::DebugLuauEqSatSimplification, true},
+        {FFlag::LuauGeneralizationRemoveRecursiveUpperBound, true},
+    };
+
+    LUAU_REQUIRE_NO_ERRORS(check(R"(
+        local t = {"hello"}
+        local v = t[2]
+        if type(v) == "nil" then
+            local foo = v
+        end
+    )"));
+
+    CHECK_EQ("(nil & string)?", toString(requireTypeAtPosition({4, 24})));
 }
 
 TEST_SUITE_END();

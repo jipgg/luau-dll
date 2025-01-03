@@ -10,6 +10,7 @@
 #include <algorithm>
 
 LUAU_FASTFLAG(LuauSolverV2);
+LUAU_FASTFLAG(LuauAutocompleteRefactorsForIncrementalAutocomplete);
 
 namespace Luau
 {
@@ -331,7 +332,7 @@ TypePack extendTypePack(
 
             return result;
         }
-        else if (const Unifiable::Error* etp = getMutable<Unifiable::Error>(pack))
+        else if (auto etp = getMutable<ErrorTypePack>(pack))
         {
             while (result.head.size() < length)
                 result.head.push_back(builtinTypes->errorRecoveryType());
@@ -426,7 +427,7 @@ TypeId stripNil(NotNull<BuiltinTypes> builtinTypes, TypeArena& arena, TypeId ty)
 
 ErrorSuppression shouldSuppressErrors(NotNull<Normalizer> normalizer, TypeId ty)
 {
-    LUAU_ASSERT(FFlag::LuauSolverV2);
+    LUAU_ASSERT(FFlag::LuauSolverV2 || FFlag::LuauAutocompleteRefactorsForIncrementalAutocomplete);
     std::shared_ptr<const NormalizedType> normType = normalizer->normalize(ty);
 
     if (!normType)
@@ -478,5 +479,69 @@ ErrorSuppression shouldSuppressErrors(NotNull<Normalizer> normalizer, TypePackId
     // otherwise, tp1 is either suppress or normalization failure which are both the appropriate overarching result
     return result;
 }
+
+bool isLiteral(const AstExpr* expr)
+{
+    return (
+        expr->is<AstExprTable>() || expr->is<AstExprFunction>() || expr->is<AstExprConstantNumber>() || expr->is<AstExprConstantString>() ||
+        expr->is<AstExprConstantBool>() || expr->is<AstExprConstantNil>()
+    );
+}
+/**
+ * Visitor which, given an expression and a mapping from expression to TypeId,
+ * determines if there are any literal expressions that contain blocked types.
+ * This is used for bi-directional inference: we want to "apply" a type from
+ * a function argument or a type annotation to a literal.
+ */
+class BlockedTypeInLiteralVisitor : public AstVisitor
+{
+public:
+    explicit BlockedTypeInLiteralVisitor(NotNull<DenseHashMap<const AstExpr*, TypeId>> astTypes, NotNull<std::vector<TypeId>> toBlock)
+        : astTypes_{astTypes}
+        , toBlock_{toBlock}
+    {
+    }
+    bool visit(AstNode*) override
+    {
+        return false;
+    }
+
+    bool visit(AstExpr* e) override
+    {
+        auto ty = astTypes_->find(e);
+        if (ty && (get<BlockedType>(follow(*ty)) != nullptr))
+        {
+            toBlock_->push_back(*ty);
+        }
+        return isLiteral(e) || e->is<AstExprGroup>();
+    }
+
+private:
+    NotNull<DenseHashMap<const AstExpr*, TypeId>> astTypes_;
+    NotNull<std::vector<TypeId>> toBlock_;
+};
+
+std::vector<TypeId> findBlockedTypesIn(AstExprTable* expr, NotNull<DenseHashMap<const AstExpr*, TypeId>> astTypes)
+{
+    std::vector<TypeId> toBlock;
+    BlockedTypeInLiteralVisitor v{astTypes, NotNull{&toBlock}};
+    expr->visit(&v);
+    return toBlock;
+}
+
+std::vector<TypeId> findBlockedArgTypesIn(AstExprCall* expr, NotNull<DenseHashMap<const AstExpr*, TypeId>> astTypes)
+{
+    std::vector<TypeId> toBlock;
+    BlockedTypeInLiteralVisitor v{astTypes, NotNull{&toBlock}};
+    for (auto arg: expr->args)
+    {
+        if (isLiteral(arg) || arg->is<AstExprGroup>())
+        {
+            arg->visit(&v);
+        }
+    }
+    return toBlock;
+}
+
 
 } // namespace Luau

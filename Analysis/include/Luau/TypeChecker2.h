@@ -2,15 +2,16 @@
 
 #pragma once
 
-#include "Luau/Error.h"
-#include "Luau/NotNull.h"
 #include "Luau/Common.h"
-#include "Luau/TypeUtils.h"
+#include "Luau/EqSatSimplification.h"
+#include "Luau/Error.h"
+#include "Luau/Normalize.h"
+#include "Luau/NotNull.h"
+#include "Luau/Subtyping.h"
 #include "Luau/Type.h"
 #include "Luau/TypeFwd.h"
 #include "Luau/TypeOrPack.h"
-#include "Luau/Normalize.h"
-#include "Luau/Subtyping.h"
+#include "Luau/TypeUtils.h"
 
 namespace Luau
 {
@@ -60,6 +61,8 @@ struct Reasonings
 
 void check(
     NotNull<BuiltinTypes> builtinTypes,
+    NotNull<Simplifier> simplifier,
+    NotNull<TypeFunctionRuntime> typeFunctionRuntime,
     NotNull<UnifierSharedState> sharedState,
     NotNull<TypeCheckLimits> limits,
     DcrLogger* logger,
@@ -70,6 +73,8 @@ void check(
 struct TypeChecker2
 {
     NotNull<BuiltinTypes> builtinTypes;
+    NotNull<Simplifier> simplifier;
+    NotNull<TypeFunctionRuntime> typeFunctionRuntime;
     DcrLogger* logger;
     const NotNull<TypeCheckLimits> limits;
     const NotNull<InternalErrorReporter> ice;
@@ -88,6 +93,8 @@ struct TypeChecker2
 
     TypeChecker2(
         NotNull<BuiltinTypes> builtinTypes,
+        NotNull<Simplifier> simplifier,
+        NotNull<TypeFunctionRuntime> typeFunctionRuntime,
         NotNull<UnifierSharedState> unifierState,
         NotNull<TypeCheckLimits> limits,
         DcrLogger* logger,
@@ -209,6 +216,9 @@ private:
         TypeId astIndexExprType,
         std::vector<TypeError>& errors
     );
+
+    // Avoid duplicate warnings being emitted for the same global variable.
+    DenseHashSet<std::string> warnedGlobals{""};
 
     void diagnoseMissingTableKey(UnknownProperty* utk, TypeErrorData& data) const;
     bool isErrorSuppressing(Location loc, TypeId ty);

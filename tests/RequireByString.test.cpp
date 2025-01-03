@@ -1,17 +1,21 @@
 // This file is part of the Luau programming language and is licensed under MIT License; see LICENSE.txt for details
 #include "Luau/Common.h"
+#include "Luau/Config.h"
+
 #include "ScopedFlags.h"
 #include "lua.h"
 #include "lualib.h"
 
-#include "Repl.h"
-#include "FileUtils.h"
+#include "Luau/Repl.h"
+#include "Luau/FileUtils.h"
 
 #include "doctest.h"
 
 #include <algorithm>
 #include <initializer_list>
 #include <memory>
+#include <optional>
+#include <string>
 
 #if __APPLE__
 #include <TargetConditionals.h>
@@ -112,7 +116,7 @@ public:
         for (int i = 0; i < 20; ++i)
         {
             bool engineTestDir = isDirectory(luauDirAbs + "/Client/Luau/tests");
-            bool luauTestDir = isDirectory(luauDirAbs + "/luau/tests/require");
+            bool luauTestDir = isDirectory(luauDirAbs + "/tests/require");
 
             if (engineTestDir || luauTestDir)
             {
@@ -121,12 +125,6 @@ public:
                     luauDirRel += "/Client/Luau";
                     luauDirAbs += "/Client/Luau";
                 }
-                else
-                {
-                    luauDirRel += "/luau";
-                    luauDirAbs += "/luau";
-                }
-
 
                 if (type == PathType::Relative)
                     return luauDirRel;
@@ -225,8 +223,8 @@ TEST_CASE("PathResolution")
 
     CHECK(resolvePath("../module", "") == "../module");
     CHECK(resolvePath("../../module", "") == "../../module");
-    CHECK(resolvePath("../module/..", "") == "..");
-    CHECK(resolvePath("../module/../..", "") == "../..");
+    CHECK(resolvePath("../module/..", "") == "../");
+    CHECK(resolvePath("../module/../..", "") == "../../");
 
     CHECK(resolvePath("../dependency", prefix + "Users/modules/module.luau") == prefix + "Users/dependency");
     CHECK(resolvePath("../dependency/", prefix + "Users/modules/module.luau") == prefix + "Users/dependency");
@@ -308,6 +306,22 @@ TEST_CASE_FIXTURE(ReplWithPathFixture, "RequireInitLua")
     assertOutputContainsAll({"true", "result from init.lua"});
 }
 
+TEST_CASE_FIXTURE(ReplWithPathFixture, "RequireWithFileAmbiguity")
+{
+    std::string ambiguousPath = getLuauDirectory(PathType::Relative) + "/tests/require/without_config/ambiguous_file_requirer";
+
+    runProtectedRequire(ambiguousPath);
+    assertOutputContainsAll({"false", "require path could not be resolved to a unique file"});
+}
+
+TEST_CASE_FIXTURE(ReplWithPathFixture, "RequireWithDirectoryAmbiguity")
+{
+    std::string ambiguousPath = getLuauDirectory(PathType::Relative) + "/tests/require/without_config/ambiguous_directory_requirer";
+
+    runProtectedRequire(ambiguousPath);
+    assertOutputContainsAll({"false", "require path could not be resolved to a unique file"});
+}
+
 TEST_CASE_FIXTURE(ReplWithPathFixture, "CheckCacheAfterRequireLuau")
 {
     std::string relativePath = getLuauDirectory(PathType::Relative) + "/tests/require/without_config/module";
@@ -384,6 +398,13 @@ TEST_CASE_FIXTURE(ReplWithPathFixture, "CheckCacheAfterRequireInitLua")
     REQUIRE_FALSE_MESSAGE(lua_isnil(L, -1), "Cache did not contain module result");
 }
 
+TEST_CASE_FIXTURE(ReplWithPathFixture, "CheckCachedResult")
+{
+    std::string relativePath = getLuauDirectory(PathType::Relative) + "/tests/require/without_config/validate_cache";
+    runProtectedRequire(relativePath);
+    assertOutputContainsAll({"true"});
+}
+
 TEST_CASE_FIXTURE(ReplWithPathFixture, "LoadStringRelative")
 {
     runCode(L, "return pcall(function() return loadstring(\"require('a/relative/path')\")() end)");
@@ -401,25 +422,18 @@ TEST_CASE_FIXTURE(ReplWithPathFixture, "RequireAbsolutePath")
     assertOutputContainsAll({"false", "cannot require an absolute path"});
 }
 
-TEST_CASE_FIXTURE(ReplWithPathFixture, "PathsArrayRelativePath")
+TEST_CASE_FIXTURE(ReplWithPathFixture, "RequireUnprefixedPath")
 {
-    std::string path = getLuauDirectory(PathType::Relative) + "/tests/require/with_config/src/requirer";
+    std::string path = "an/unprefixed/path";
     runProtectedRequire(path);
-    assertOutputContainsAll({"true", "result from library"});
+    assertOutputContainsAll({"false", "require path must start with a valid prefix: ./, ../, or @"});
 }
 
-TEST_CASE_FIXTURE(ReplWithPathFixture, "PathsArrayExplicitlyRelativePath")
+TEST_CASE_FIXTURE(ReplWithPathFixture, "RequirePathWithExtension")
 {
-    std::string path = getLuauDirectory(PathType::Relative) + "/tests/require/with_config/src/fail_requirer";
+    std::string path = getLuauDirectory(PathType::Relative) + "/tests/require/without_config/dependency.luau";
     runProtectedRequire(path);
-    assertOutputContainsAll({"false", "error requiring module"});
-}
-
-TEST_CASE_FIXTURE(ReplWithPathFixture, "PathsArrayFromParent")
-{
-    std::string path = getLuauDirectory(PathType::Relative) + "/tests/require/with_config/src/global_library_requirer";
-    runProtectedRequire(path);
-    assertOutputContainsAll({"true", "result from global_library"});
+    assertOutputContainsAll({"false", "error requiring module: consider removing the file extension"});
 }
 
 TEST_CASE_FIXTURE(ReplWithPathFixture, "RequirePathWithAlias")
@@ -473,6 +487,46 @@ TEST_CASE_FIXTURE(ReplWithPathFixture, "AliasHasIllegalFormat")
 
     runProtectedRequire(emptyAlias);
     assertOutputContainsAll({"false", " is not a valid alias"});
+}
+
+TEST_CASE("ParseAliases")
+{
+    std::string configJson = R"({
+    "aliases": {
+        "MyAlias": "/my/alias/path",
+    }
+})";
+
+    Luau::Config config;
+
+    Luau::ConfigOptions::AliasOptions aliasOptions;
+    aliasOptions.configLocation = "/default/location";
+    aliasOptions.overwriteAliases = true;
+
+    Luau::ConfigOptions options{false, aliasOptions};
+
+    std::optional<std::string> error = Luau::parseConfig(configJson, config, options);
+    REQUIRE(!error);
+
+    auto checkContents = [](Luau::Config& config) -> void
+    {
+        CHECK(config.aliases.size() == 1);
+        REQUIRE(config.aliases.contains("myalias"));
+
+        Luau::Config::AliasInfo& aliasInfo = config.aliases["myalias"];
+        CHECK(aliasInfo.value == "/my/alias/path");
+        CHECK(aliasInfo.originalCase == "MyAlias");
+    };
+
+    checkContents(config);
+
+    // Ensure that copied Configs retain the same information
+    Luau::Config copyConstructedConfig = config;
+    checkContents(copyConstructedConfig);
+
+    Luau::Config copyAssignedConfig;
+    copyAssignedConfig = config;
+    checkContents(copyAssignedConfig);
 }
 
 TEST_SUITE_END();

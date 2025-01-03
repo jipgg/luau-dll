@@ -31,11 +31,16 @@ extern int optimizationLevel;
 void luaC_fullgc(lua_State* L);
 void luaC_validate(lua_State* L);
 
+LUAU_FASTFLAG(LuauMathMap)
 LUAU_FASTFLAG(DebugLuauAbortingChecks)
 LUAU_FASTINT(CodegenHeuristicsInstructionLimit)
-LUAU_FASTFLAG(LuauNativeAttribute)
-LUAU_FASTFLAG(LuauPreserveLudataRenaming)
-LUAU_FASTFLAG(LuauCodegenArmNumToVecFix)
+LUAU_DYNAMIC_FASTFLAG(LuauStackLimit)
+LUAU_FASTFLAG(LuauVectorDefinitions)
+LUAU_DYNAMIC_FASTFLAG(LuauDebugInfoInvArgLeftovers)
+LUAU_FASTFLAG(LuauVectorLibNativeCodegen)
+LUAU_FASTFLAG(LuauVectorLibNativeDot)
+LUAU_FASTFLAG(LuauVectorBuiltins)
+LUAU_FASTFLAG(LuauVectorMetatable)
 
 static lua_CompileOptions defaultOptions()
 {
@@ -654,6 +659,8 @@ TEST_CASE("Buffers")
 
 TEST_CASE("Math")
 {
+    ScopedFastFlag LuauMathMap{FFlag::LuauMathMap, true};
+
     runConformance("math.lua");
 }
 
@@ -754,6 +761,8 @@ TEST_CASE("Closure")
 
 TEST_CASE("Calls")
 {
+    ScopedFastFlag LuauStackLimit{DFFlag::LuauStackLimit, true};
+
     runConformance("calls.lua");
 }
 
@@ -793,6 +802,8 @@ static int cxxthrow(lua_State* L)
 
 TEST_CASE("PCall")
 {
+    ScopedFastFlag LuauStackLimit{DFFlag::LuauStackLimit, true};
+
     runConformance(
         "pcall.lua",
         [](lua_State* L)
@@ -825,8 +836,6 @@ TEST_CASE("Pack")
 
 TEST_CASE("Vector")
 {
-    ScopedFastFlag luauCodegenArmNumToVecFix{FFlag::LuauCodegenArmNumToVecFix, true};
-
     lua_CompileOptions copts = defaultOptions();
     Luau::CodeGen::CompilationOptions nativeOpts = defaultCodegenOptions();
 
@@ -877,6 +886,33 @@ TEST_CASE("Vector")
         &copts,
         false,
         &nativeOpts
+    );
+}
+
+TEST_CASE("VectorLibrary")
+{
+    ScopedFastFlag luauVectorBuiltins{FFlag::LuauVectorBuiltins, true};
+    ScopedFastFlag luauVectorLibNativeCodegen{FFlag::LuauVectorLibNativeCodegen, true};
+    ScopedFastFlag luauVectorLibNativeDot{FFlag::LuauVectorLibNativeDot, true};
+    ScopedFastFlag luauVectorMetatable{FFlag::LuauVectorMetatable, true};
+
+    lua_CompileOptions copts = defaultOptions();
+
+    SUBCASE("O0")
+    {
+        copts.optimizationLevel = 0;
+    }
+    SUBCASE("O1")
+    {
+        copts.optimizationLevel = 1;
+    }
+    SUBCASE("O2")
+    {
+        copts.optimizationLevel = 2;
+    }
+
+    runConformance(
+        "vector_library.lua", [](lua_State* L) {}, nullptr, nullptr, &copts
     );
 }
 
@@ -939,6 +975,10 @@ static void populateRTTI(lua_State* L, Luau::TypeId type)
 
         lua_pushstring(L, "function");
     }
+    else if (auto c = Luau::get<Luau::ClassType>(type))
+    {
+        lua_pushstring(L, c->name.c_str());
+    }
     else
     {
         LUAU_ASSERT(!"Unknown type");
@@ -947,6 +987,8 @@ static void populateRTTI(lua_State* L, Luau::TypeId type)
 
 TEST_CASE("Types")
 {
+    ScopedFastFlag luauVectorDefinitions{FFlag::LuauVectorDefinitions, true};
+
     runConformance(
         "types.lua",
         [](lua_State* L)
@@ -978,6 +1020,8 @@ TEST_CASE("DateTime")
 
 TEST_CASE("Debug")
 {
+    ScopedFastFlag luauDebugInfoInvArgLeftovers{DFFlag::LuauDebugInfoInvArgLeftovers, true};
+
     runConformance("debug.lua");
 }
 
@@ -2192,9 +2236,7 @@ TEST_CASE("UserdataApi")
     lua_getuserdatametatable(L, 50);
     lua_setmetatable(L, -2);
 
-    void* ud8 = lua_newuserdatatagged(L, 16, 51);
-    lua_getuserdatametatable(L, 51);
-    lua_setmetatable(L, -2);
+    void* ud8 = lua_newuserdatataggedwithmetatable(L, 16, 51);
 
     CHECK(luaL_checkudata(L, -2, "udata3") == ud7);
     CHECK(luaL_checkudata(L, -1, "udata4") == ud8);
@@ -2251,20 +2293,17 @@ TEST_CASE("LightuserdataApi")
 
     lua_pop(L, 1);
 
-    if (FFlag::LuauPreserveLudataRenaming)
-    {
-        // Still possible to rename the global lightuserdata name using a metatable
-        lua_pushlightuserdata(L, value);
-        CHECK(strcmp(luaL_typename(L, -1), "userdata") == 0);
+    // Still possible to rename the global lightuserdata name using a metatable
+    lua_pushlightuserdata(L, value);
+    CHECK(strcmp(luaL_typename(L, -1), "userdata") == 0);
 
-        lua_createtable(L, 0, 1);
-        lua_pushstring(L, "luserdata");
-        lua_setfield(L, -2, "__type");
-        lua_setmetatable(L, -2);
+    lua_createtable(L, 0, 1);
+    lua_pushstring(L, "luserdata");
+    lua_setfield(L, -2, "__type");
+    lua_setmetatable(L, -2);
 
-        CHECK(strcmp(luaL_typename(L, -1), "luserdata") == 0);
-        lua_pop(L, 1);
-    }
+    CHECK(strcmp(luaL_typename(L, -1), "luserdata") == 0);
+    lua_pop(L, 1);
 
     globalState.reset();
 }
@@ -2916,8 +2955,6 @@ TEST_CASE("NativeAttribute")
 {
     if (!codegen || !luau_codegen_supported())
         return;
-
-    ScopedFastFlag sffs[] = {{FFlag::LuauNativeAttribute, true}};
 
     std::string source = R"R(
         @native

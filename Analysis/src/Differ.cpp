@@ -13,6 +13,7 @@
 
 namespace Luau
 {
+
 std::string DiffPathNode::toString() const
 {
     switch (kind)
@@ -718,7 +719,7 @@ static DifferResult diffUsingEnv(DifferEnvironment& env, TypeId left, TypeId rig
         env.popVisiting();
         return diffRes;
     }
-    if (auto le = get<Luau::Unifiable::Error>(left))
+    if (auto le = get<ErrorType>(left))
     {
         // TODO: return debug-friendly result state
         env.popVisiting();
@@ -944,11 +945,13 @@ std::vector<std::pair<TypeId, TypeId>>::const_reverse_iterator DifferEnvironment
     return visitingStack.crend();
 }
 
+
 DifferResult diff(TypeId ty1, TypeId ty2)
 {
     DifferEnvironment differEnv{ty1, ty2, std::nullopt, std::nullopt};
     return diffUsingEnv(differEnv, ty1, ty2);
 }
+
 
 DifferResult diffWithSymbols(TypeId ty1, TypeId ty2, std::optional<std::string> symbol1, std::optional<std::string> symbol2)
 {

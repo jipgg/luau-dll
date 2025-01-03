@@ -114,10 +114,12 @@ enum class IrCmd : uint8_t
     STORE_INT,
 
     // Store a vector into TValue
+    // When optional 'E' tag is present, it is written out to the TValue as well
     // A: Rn
     // B: double (x)
     // C: double (y)
     // D: double (z)
+    // E: tag (optional)
     STORE_VECTOR,
 
     // Store a TValue into memory
@@ -193,6 +195,10 @@ enum class IrCmd : uint8_t
     // Negate a vector
     // A: TValue
     UNM_VEC,
+
+    // Compute dot product between two vectors
+    // A, B: TValue
+    DOT_VEC,
 
     // Compute Luau 'not' operation on destructured TValue
     // A: tag

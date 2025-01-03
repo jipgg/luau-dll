@@ -13,7 +13,6 @@
 using namespace Luau;
 
 LUAU_FASTFLAG(LuauSolverV2)
-LUAU_FASTFLAG(LuauUserDefinedTypeFunctions)
 LUAU_DYNAMIC_FASTINT(LuauTypeFamilyApplicationCartesianProductLimit)
 
 struct TypeFunctionFixture : Fixture
@@ -21,7 +20,7 @@ struct TypeFunctionFixture : Fixture
     TypeFunction swapFunction;
 
     TypeFunctionFixture()
-        : Fixture(true, false)
+        : Fixture(false)
     {
         swapFunction = TypeFunction{
             /* name */ "Swap",
@@ -34,20 +33,20 @@ struct TypeFunctionFixture : Fixture
 
                 if (isString(param))
                 {
-                    return TypeFunctionReductionResult<TypeId>{ctx->builtins->numberType, false, {}, {}};
+                    return TypeFunctionReductionResult<TypeId>{ctx->builtins->numberType, Reduction::MaybeOk, {}, {}};
                 }
                 else if (isNumber(param))
                 {
-                    return TypeFunctionReductionResult<TypeId>{ctx->builtins->stringType, false, {}, {}};
+                    return TypeFunctionReductionResult<TypeId>{ctx->builtins->stringType, Reduction::MaybeOk, {}, {}};
                 }
                 else if (is<BlockedType>(param) || is<PendingExpansionType>(param) || is<TypeFunctionInstanceType>(param) ||
                          (ctx->solver && ctx->solver->hasUnresolvedConstraints(param)))
                 {
-                    return TypeFunctionReductionResult<TypeId>{std::nullopt, false, {param}, {}};
+                    return TypeFunctionReductionResult<TypeId>{std::nullopt, Reduction::MaybeOk, {param}, {}};
                 }
                 else
                 {
-                    return TypeFunctionReductionResult<TypeId>{std::nullopt, true, {}, {}};
+                    return TypeFunctionReductionResult<TypeId>{std::nullopt, Reduction::Erroneous, {}, {}};
                 }
             }
         };
@@ -1247,18 +1246,20 @@ TEST_CASE_FIXTURE(ClassFixture, "rawget_type_function_errors_w_classes")
     CHECK(toString(result.errors[0]) == "Property '\"BaseField\"' does not exist on type 'BaseClass'");
 }
 
-TEST_CASE_FIXTURE(Fixture, "user_defined_type_function_errors")
+TEST_CASE_FIXTURE(Fixture, "fuzz_len_type_function_follow")
 {
-    if (!FFlag::LuauUserDefinedTypeFunctions)
-        return;
-
-    CheckResult result = check(R"(
-    type function foo()
-        return nil
-    end
+    // Should not fail assertions
+    check(R"(
+        local _
+        _ = true
+        for l0=_,_,# _ do
+        end
+        for l0=_,_ do
+        if _ then
+        _ += _
+        end
+        end
     )");
-    LUAU_CHECK_ERROR_COUNT(1, result);
-    CHECK(toString(result.errors[0]) == "This syntax is not supported");
 }
 
 TEST_SUITE_END();

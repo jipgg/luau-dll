@@ -31,6 +31,7 @@ namespace Luau
 struct TypeArena;
 struct Scope;
 using ScopePtr = std::shared_ptr<Scope>;
+struct Module;
 
 struct TypeFunction;
 struct Constraint;
@@ -598,6 +599,19 @@ struct ClassType
     }
 };
 
+// Data required to initialize a user-defined function and its environment
+struct UserDefinedFunctionData
+{
+    // Store a weak module reference to ensure the lifetime requirements are preserved
+    std::weak_ptr<Module> owner;
+
+    // References to AST elements are owned by the Module allocator which also stores this type
+    AstStatTypeFunction* definition = nullptr;
+
+    DenseHashMap<Name, std::pair<AstStatTypeFunction*, size_t>> environment{""};
+    DenseHashMap<Name, AstStatTypeFunction*> environment_DEPRECATED{""};
+};
+
 /**
  * An instance of a type function that has not yet been reduced to a more concrete
  * type. The constraint solver receives a constraint to reduce each
@@ -613,20 +627,20 @@ struct TypeFunctionInstanceType
     std::vector<TypePackId> packArguments;
 
     std::optional<AstName> userFuncName;          // Name of the user-defined type function; only available for UDTFs
-    std::optional<AstExprFunction*> userFuncBody; // Body of the user-defined type function; only available for UDTFs
+    UserDefinedFunctionData userFuncData;
 
     TypeFunctionInstanceType(
         NotNull<const TypeFunction> function,
         std::vector<TypeId> typeArguments,
         std::vector<TypePackId> packArguments,
-        std::optional<AstName> userFuncName = std::nullopt,
-        std::optional<AstExprFunction*> userFuncBody = std::nullopt
+        std::optional<AstName> userFuncName,
+        UserDefinedFunctionData userFuncData
     )
         : function(function)
         , typeArguments(typeArguments)
         , packArguments(packArguments)
         , userFuncName(userFuncName)
-        , userFuncBody(userFuncBody)
+        , userFuncData(userFuncData)
     {
     }
 
@@ -639,6 +653,13 @@ struct TypeFunctionInstanceType
 
     TypeFunctionInstanceType(const TypeFunction& function, std::vector<TypeId> typeArguments, std::vector<TypePackId> packArguments)
         : function{&function}
+        , typeArguments(typeArguments)
+        , packArguments(packArguments)
+    {
+    }
+
+    TypeFunctionInstanceType(NotNull<const TypeFunction> function, std::vector<TypeId> typeArguments, std::vector<TypePackId> packArguments)
+        : function{function}
         , typeArguments(typeArguments)
         , packArguments(packArguments)
     {
@@ -667,6 +688,11 @@ struct PendingExpansionType
 
 // Anything!  All static checking is off.
 struct AnyType
+{
+};
+
+// A special, trivial type for the refinement system that is always eliminated from intersections.
+struct NoRefineType
 {
 };
 
@@ -737,7 +763,7 @@ struct NegationType
     TypeId ty;
 };
 
-using ErrorType = Unifiable::Error;
+using ErrorType = Unifiable::Error<TypeId>;
 
 using TypeVariant = Unifiable::Variant<
     TypeId,
@@ -758,6 +784,7 @@ using TypeVariant = Unifiable::Variant<
     UnknownType,
     NeverType,
     NegationType,
+    NoRefineType,
     TypeFunctionInstanceType>;
 
 struct Type final
@@ -803,6 +830,13 @@ struct Type final
     Type& operator=(const TypeVariant& rhs);
     Type& operator=(TypeVariant&& rhs);
 
+    Type(Type&&) = default;
+    Type& operator=(Type&&) = default;
+
+    Type clone() const;
+
+private:
+    Type(const Type&) = default;
     Type& operator=(const Type& rhs);
 };
 
@@ -952,6 +986,7 @@ public:
     const TypeId unknownType;
     const TypeId neverType;
     const TypeId errorType;
+    const TypeId noRefineType;
     const TypeId falsyType;
     const TypeId truthyType;
 
@@ -1158,6 +1193,10 @@ TypeId freshType(NotNull<TypeArena> arena, NotNull<BuiltinTypes> builtinTypes, S
 
 using TypeIdPredicate = std::function<std::optional<TypeId>(TypeId)>;
 std::vector<TypeId> filterMap(TypeId type, TypeIdPredicate predicate);
+
+// A tag to mark a type which doesn't derive directly from the root type as overriding the return of `typeof`.
+// Any classes which derive from this type will have typeof return this type.
+static constexpr char kTypeofRootTag[] = "typeofRoot";
 
 void attachTag(TypeId ty, const std::string& tagName);
 void attachTag(Property& prop, const std::string& tagName);

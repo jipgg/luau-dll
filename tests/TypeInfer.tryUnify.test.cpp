@@ -17,7 +17,7 @@ LUAU_FASTFLAG(LuauUnifierRecursionOnRestart);
 struct TryUnifyFixture : Fixture
 {
     // Cannot use `TryUnifyFixture` under DCR.
-    ScopedFastFlag noDcr{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     TypeArena arena;
     ScopePtr globalScope{new Scope{arena.addTypePack({TypeId{}})}};
@@ -32,7 +32,7 @@ TEST_SUITE_BEGIN("TryUnifyTests");
 TEST_CASE_FIXTURE(TryUnifyFixture, "primitives_unify")
 {
     Type numberOne{TypeVariant{PrimitiveType{PrimitiveType::Number}}};
-    Type numberTwo = numberOne;
+    Type numberTwo = numberOne.clone();
 
     state.tryUnify(&numberTwo, &numberOne);
 
@@ -64,13 +64,13 @@ TEST_CASE_FIXTURE(TryUnifyFixture, "incompatible_functions_are_preserved")
     Type functionOne{TypeVariant{FunctionType(arena.addTypePack({arena.freshType(globalScope->level)}), arena.addTypePack({builtinTypes->numberType}))
     }};
 
-    Type functionOneSaved = functionOne;
+    Type functionOneSaved = functionOne.clone();
 
     TypePackVar argPackTwo{TypePack{{arena.freshType(globalScope->level)}, std::nullopt}};
     Type functionTwo{TypeVariant{FunctionType(arena.addTypePack({arena.freshType(globalScope->level)}), arena.addTypePack({builtinTypes->stringType}))
     }};
 
-    Type functionTwoSaved = functionTwo;
+    Type functionTwoSaved = functionTwo.clone();
 
     state.tryUnify(&functionTwo, &functionOne);
     CHECK(state.failure);
@@ -154,7 +154,7 @@ TEST_CASE_FIXTURE(Fixture, "uninhabited_intersection_sub_anything")
 
 TEST_CASE_FIXTURE(Fixture, "uninhabited_table_sub_never")
 {
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         function f(arg : { prop : string & number }) : never
@@ -166,7 +166,7 @@ TEST_CASE_FIXTURE(Fixture, "uninhabited_table_sub_never")
 
 TEST_CASE_FIXTURE(Fixture, "uninhabited_table_sub_anything")
 {
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         function f(arg : { prop : string & number }) : boolean
@@ -178,7 +178,7 @@ TEST_CASE_FIXTURE(Fixture, "uninhabited_table_sub_anything")
 
 TEST_CASE_FIXTURE(Fixture, "members_of_failed_typepack_unification_are_unified_with_errorType")
 {
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         function f(arg: number) end
@@ -195,7 +195,7 @@ TEST_CASE_FIXTURE(Fixture, "members_of_failed_typepack_unification_are_unified_w
 
 TEST_CASE_FIXTURE(Fixture, "result_of_failed_typepack_unification_is_constrained")
 {
-    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     CheckResult result = check(R"(
         function f(arg: number) return arg end

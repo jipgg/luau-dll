@@ -11,7 +11,8 @@
 #include "lstate.h"
 #include "lgc.h"
 
-LUAU_FASTFLAGVARIABLE(LuauCodegenArmNumToVecFix, false)
+LUAU_FASTFLAG(LuauVectorLibNativeDot)
+LUAU_FASTFLAG(LuauCodeGenVectorDeadStoreElim)
 
 namespace Luau
 {
@@ -497,6 +498,13 @@ void IrLoweringA64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
         build.str(temp4, AddressA64(addr.base, addr.data + 4));
         build.fcvt(temp4, temp3);
         build.str(temp4, AddressA64(addr.base, addr.data + 8));
+
+        if (FFlag::LuauCodeGenVectorDeadStoreElim && inst.e.kind != IrOpKind::None)
+        {
+            RegisterA64 temp = regs.allocTemp(KindA64::w);
+            build.mov(temp, tagOp(inst.e));
+            build.str(temp, tempAddr(inst.a, offsetof(TValue, tt)));
+        }
         break;
     }
     case IrCmd::STORE_TVALUE:
@@ -728,6 +736,23 @@ void IrLoweringA64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
         inst.regA64 = regs.allocReuse(KindA64::q, index, {inst.a});
 
         build.fneg(inst.regA64, regOp(inst.a));
+        break;
+    }
+    case IrCmd::DOT_VEC:
+    {
+        LUAU_ASSERT(FFlag::LuauVectorLibNativeDot);
+
+        inst.regA64 = regs.allocReg(KindA64::d, index);
+
+        RegisterA64 temp = regs.allocTemp(KindA64::q);
+        RegisterA64 temps = castReg(KindA64::s, temp);
+        RegisterA64 regs = castReg(KindA64::s, inst.regA64);
+
+        build.fmul(temp, regOp(inst.a), regOp(inst.b));
+        build.faddp(regs, temps); // x+y
+        build.dup_4s(temp, temp, 2);
+        build.fadd(regs, regs, temps); // +z
+        build.fcvt(inst.regA64, regs);
         break;
     }
     case IrCmd::NOT_ANY:
@@ -1121,7 +1146,7 @@ void IrLoweringA64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
         else
         {
             RegisterA64 tempd = tempDouble(inst.a);
-            RegisterA64 temps = FFlag::LuauCodegenArmNumToVecFix ? regs.allocTemp(KindA64::s) : castReg(KindA64::s, tempd);
+            RegisterA64 temps = regs.allocTemp(KindA64::s);
 
             build.fcvt(temps, tempd);
             build.dup_4s(inst.regA64, castReg(KindA64::q, temps), 0);

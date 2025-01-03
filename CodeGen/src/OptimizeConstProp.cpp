@@ -9,6 +9,7 @@
 #include "lua.h"
 
 #include <limits.h>
+#include <math.h>
 
 #include <array>
 #include <utility>
@@ -17,7 +18,9 @@
 LUAU_FASTINTVARIABLE(LuauCodeGenMinLinearBlockPath, 3)
 LUAU_FASTINTVARIABLE(LuauCodeGenReuseSlotLimit, 64)
 LUAU_FASTINTVARIABLE(LuauCodeGenReuseUdataTagLimit, 64)
-LUAU_FASTFLAGVARIABLE(DebugLuauAbortingChecks, false)
+LUAU_FASTFLAGVARIABLE(DebugLuauAbortingChecks)
+LUAU_FASTFLAG(LuauVectorLibNativeDot);
+LUAU_FASTFLAGVARIABLE(LuauCodeGenArithOpt);
 
 namespace Luau
 {
@@ -361,7 +364,7 @@ struct ConstPropState
             return;
 
         // To avoid captured register invalidation tracking in lowering later, values from loads from captured registers are not propagated
-        // This prevents the case where load value location is linked to memory in case of a spill and is then cloberred in a user call
+        // This prevents the case where load value location is linked to memory in case of a spill and is then clobbered in a user call
         if (function.cfg.captured.regs.test(vmRegOp(loadInst.a)))
             return;
 
@@ -375,7 +378,7 @@ struct ConstPropState
             if (!instLink.contains(*prevIdx))
                 createRegLink(*prevIdx, loadInst.a);
 
-            // Substitute load instructon with the previous value
+            // Substitute load instruction with the previous value
             substitute(function, loadInst, IrOp{IrOpKind::Inst, *prevIdx});
             return;
         }
@@ -398,7 +401,7 @@ struct ConstPropState
             return;
 
         // To avoid captured register invalidation tracking in lowering later, values from stores into captured registers are not propagated
-        // This prevents the case where store creates an alternative value location in case of a spill and is then cloberred in a user call
+        // This prevents the case where store creates an alternative value location in case of a spill and is then clobbered in a user call
         if (function.cfg.captured.regs.test(vmRegOp(storeInst.a)))
             return;
 
@@ -536,6 +539,17 @@ static void handleBuiltinEffects(ConstPropState& state, LuauBuiltinFunction bfid
     case LBF_BUFFER_WRITEF32:
     case LBF_BUFFER_READF64:
     case LBF_BUFFER_WRITEF64:
+    case LBF_VECTOR_MAGNITUDE:
+    case LBF_VECTOR_NORMALIZE:
+    case LBF_VECTOR_CROSS:
+    case LBF_VECTOR_DOT:
+    case LBF_VECTOR_FLOOR:
+    case LBF_VECTOR_CEIL:
+    case LBF_VECTOR_ABS:
+    case LBF_VECTOR_SIGN:
+    case LBF_VECTOR_CLAMP:
+    case LBF_VECTOR_MIN:
+    case LBF_VECTOR_MAX:
         break;
     case LBF_TABLE_INSERT:
         state.invalidateHeap();
@@ -757,7 +771,8 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
             if (tag == LUA_TBOOLEAN &&
                 (value.kind == IrOpKind::Inst || (value.kind == IrOpKind::Constant && function.constOp(value).kind == IrConstKind::Int)))
                 canSplitTvalueStore = true;
-            else if (tag == LUA_TNUMBER && (value.kind == IrOpKind::Inst || (value.kind == IrOpKind::Constant && function.constOp(value).kind == IrConstKind::Double)))
+            else if (tag == LUA_TNUMBER &&
+                     (value.kind == IrOpKind::Inst || (value.kind == IrOpKind::Constant && function.constOp(value).kind == IrConstKind::Double)))
                 canSplitTvalueStore = true;
             else if (tag != 0xff && isGCO(tag) && value.kind == IrOpKind::Inst)
                 canSplitTvalueStore = true;
@@ -1179,10 +1194,67 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
         break;
     case IrCmd::ADD_INT:
     case IrCmd::SUB_INT:
+        state.substituteOrRecord(inst, index);
+        break;
     case IrCmd::ADD_NUM:
     case IrCmd::SUB_NUM:
+        if (FFlag::LuauCodeGenArithOpt)
+        {
+            if (std::optional<double> k = function.asDoubleOp(inst.b.kind == IrOpKind::Constant ? inst.b : state.tryGetValue(inst.b)))
+            {
+                // a + 0.0 and a - (-0.0) can't be folded since the behavior is different for negative zero
+                // however, a - 0.0 and a + (-0.0) can be folded into a
+                if (*k == 0.0 && bool(signbit(*k)) == (inst.cmd == IrCmd::ADD_NUM))
+                    substitute(function, inst, inst.a);
+                else
+                    state.substituteOrRecord(inst, index);
+            }
+            else
+                state.substituteOrRecord(inst, index);
+        }
+        else
+            state.substituteOrRecord(inst, index);
+        break;
     case IrCmd::MUL_NUM:
+        if (FFlag::LuauCodeGenArithOpt)
+        {
+            if (std::optional<double> k = function.asDoubleOp(inst.b.kind == IrOpKind::Constant ? inst.b : state.tryGetValue(inst.b)))
+            {
+                if (*k == 1.0) // a * 1.0 = a
+                    substitute(function, inst, inst.a);
+                else if (*k == 2.0) // a * 2.0 = a + a
+                    replace(function, block, index, {IrCmd::ADD_NUM, inst.a, inst.a});
+                else if (*k == -1.0) // a * -1.0 = -a
+                    replace(function, block, index, {IrCmd::UNM_NUM, inst.a});
+                else
+                    state.substituteOrRecord(inst, index);
+            }
+            else
+                state.substituteOrRecord(inst, index);
+        }
+        else
+            state.substituteOrRecord(inst, index);
+        break;
     case IrCmd::DIV_NUM:
+        if (FFlag::LuauCodeGenArithOpt)
+        {
+            if (std::optional<double> k = function.asDoubleOp(inst.b.kind == IrOpKind::Constant ? inst.b : state.tryGetValue(inst.b)))
+            {
+                if (*k == 1.0) // a / 1.0 = a
+                    substitute(function, inst, inst.a);
+                else if (*k == -1.0) // a / -1.0 = -a
+                    replace(function, block, index, {IrCmd::UNM_NUM, inst.a});
+                else if (int exp = 0; frexp(*k, &exp) == 0.5 && exp >= -1000 && exp <= 1000) // a / 2^k = a * 2^-k
+                    replace(function, block, index, {IrCmd::MUL_NUM, inst.a, build.constDouble(1.0 / *k)});
+                else
+                    state.substituteOrRecord(inst, index);
+            }
+            else
+                state.substituteOrRecord(inst, index);
+        }
+        else
+            state.substituteOrRecord(inst, index);
+        break;
     case IrCmd::IDIV_NUM:
     case IrCmd::MOD_NUM:
     case IrCmd::MIN_NUM:
@@ -1331,6 +1403,10 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
     case IrCmd::SUB_VEC:
     case IrCmd::MUL_VEC:
     case IrCmd::DIV_VEC:
+    case IrCmd::DOT_VEC:
+        if (inst.cmd == IrCmd::DOT_VEC)
+            LUAU_ASSERT(FFlag::LuauVectorLibNativeDot);
+
         if (IrInst* a = function.asInstOp(inst.a); a && a->cmd == IrCmd::TAG_VECTOR)
             replace(function, inst.a, a->a);
 

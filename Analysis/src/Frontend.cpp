@@ -10,6 +10,7 @@
 #include "Luau/ConstraintSolver.h"
 #include "Luau/DataFlowGraph.h"
 #include "Luau/DcrLogger.h"
+#include "Luau/EqSatSimplification.h"
 #include "Luau/FileResolver.h"
 #include "Luau/NonStrictTypeChecker.h"
 #include "Luau/Parser.h"
@@ -36,18 +37,20 @@ LUAU_FASTINT(LuauTypeInferIterationLimit)
 LUAU_FASTINT(LuauTypeInferRecursionLimit)
 LUAU_FASTINT(LuauTarjanChildLimit)
 LUAU_FASTFLAG(LuauInferInNoCheckMode)
-LUAU_FASTFLAGVARIABLE(LuauKnowsTheDataModel3, false)
-LUAU_FASTFLAGVARIABLE(LuauStoreCommentsForDefinitionFiles, false)
+LUAU_FASTFLAGVARIABLE(LuauKnowsTheDataModel3)
+LUAU_FASTFLAGVARIABLE(LuauStoreCommentsForDefinitionFiles)
 LUAU_FASTFLAG(LuauSolverV2)
-LUAU_FASTFLAGVARIABLE(DebugLuauLogSolverToJson, false)
-LUAU_FASTFLAGVARIABLE(DebugLuauLogSolverToJsonFile, false)
-LUAU_FASTFLAGVARIABLE(DebugLuauForbidInternalTypes, false)
-LUAU_FASTFLAGVARIABLE(DebugLuauForceStrictMode, false)
-LUAU_FASTFLAGVARIABLE(DebugLuauForceNonStrictMode, false)
-LUAU_FASTFLAGVARIABLE(LuauSourceModuleUpdatedWithSelectedMode, false)
+LUAU_FASTFLAGVARIABLE(DebugLuauLogSolverToJson)
+LUAU_FASTFLAGVARIABLE(DebugLuauLogSolverToJsonFile)
+LUAU_FASTFLAGVARIABLE(DebugLuauForbidInternalTypes)
+LUAU_FASTFLAGVARIABLE(DebugLuauForceStrictMode)
+LUAU_FASTFLAGVARIABLE(DebugLuauForceNonStrictMode)
 LUAU_DYNAMIC_FASTFLAGVARIABLE(LuauRunCustomModuleChecks, false)
 
 LUAU_FASTFLAG(StudioReportLuauAny2)
+LUAU_FASTFLAGVARIABLE(LuauStoreSolverTypeOnModule)
+
+LUAU_FASTFLAGVARIABLE(LuauReferenceAllocatorInNewSolver)
 
 namespace Luau
 {
@@ -205,72 +208,6 @@ LoadDefinitionFileResult Frontend::loadDefinitionFile(
     return LoadDefinitionFileResult{true, parseResult, sourceModule, checkedModule};
 }
 
-std::vector<std::string_view> parsePathExpr(const AstExpr& pathExpr)
-{
-    const AstExprIndexName* indexName = pathExpr.as<AstExprIndexName>();
-    if (!indexName)
-        return {};
-
-    std::vector<std::string_view> segments{indexName->index.value};
-
-    while (true)
-    {
-        if (AstExprIndexName* in = indexName->expr->as<AstExprIndexName>())
-        {
-            segments.push_back(in->index.value);
-            indexName = in;
-            continue;
-        }
-        else if (AstExprGlobal* indexNameAsGlobal = indexName->expr->as<AstExprGlobal>())
-        {
-            segments.push_back(indexNameAsGlobal->name.value);
-            break;
-        }
-        else if (AstExprLocal* indexNameAsLocal = indexName->expr->as<AstExprLocal>())
-        {
-            segments.push_back(indexNameAsLocal->local->name.value);
-            break;
-        }
-        else
-            return {};
-    }
-
-    std::reverse(segments.begin(), segments.end());
-    return segments;
-}
-
-std::optional<std::string> pathExprToModuleName(const ModuleName& currentModuleName, const std::vector<std::string_view>& segments)
-{
-    if (segments.empty())
-        return std::nullopt;
-
-    std::vector<std::string_view> result;
-
-    auto it = segments.begin();
-
-    if (*it == "script" && !currentModuleName.empty())
-    {
-        result = split(currentModuleName, '/');
-        ++it;
-    }
-
-    for (; it != segments.end(); ++it)
-    {
-        if (result.size() > 1 && *it == "Parent")
-            result.pop_back();
-        else
-            result.push_back(*it);
-    }
-
-    return join(result, "/");
-}
-
-std::optional<std::string> pathExprToModuleName(const ModuleName& currentModuleName, const AstExpr& pathExpr)
-{
-    std::vector<std::string_view> segments = parsePathExpr(pathExpr);
-    return pathExprToModuleName(currentModuleName, segments);
-}
-
 namespace
 {
 
@@ -351,8 +288,7 @@ static void filterLintOptions(LintOptions& lintOptions, const std::vector<HotCom
 std::vector<RequireCycle> getRequireCycles(
     const FileResolver* resolver,
     const std::unordered_map<ModuleName, std::shared_ptr<SourceNode>>& sourceNodes,
-    const SourceNode* start,
-    bool stopAtFirst = false
+    const SourceNode* start
 )
 {
     std::vector<RequireCycle> result;
@@ -421,9 +357,6 @@ std::vector<RequireCycle> getRequireCycles(
         if (!cycle.empty())
         {
             result.push_back({depLocation, std::move(cycle)});
-
-            if (stopAtFirst)
-                return result;
 
             // note: if we didn't find a cycle, all nodes that we've seen don't depend [transitively] on start
             // so it's safe to *only* clear seen vector when we find a cycle
@@ -812,6 +745,32 @@ std::optional<CheckResult> Frontend::getCheckResult(const ModuleName& name, bool
     return checkResult;
 }
 
+std::vector<ModuleName> Frontend::getRequiredScripts(const ModuleName& name)
+{
+    RequireTraceResult require = requireTrace[name];
+    if (isDirty(name))
+    {
+        std::optional<SourceCode> source = fileResolver->readSource(name);
+        if (!source)
+        {
+            return {};
+        }
+        const Config& config = configResolver->getConfig(name);
+        ParseOptions opts = config.parseOptions;
+        opts.captureComments = true;
+        SourceModule result = parse(name, source->source, opts);
+        result.type = source->type;
+        require = traceRequires(fileResolver, result.root, name);
+    }
+    std::vector<std::string> requiredModuleNames;
+    requiredModuleNames.reserve(require.requireList.size());
+    for (const auto& [moduleName, _] : require.requireList)
+    {
+        requiredModuleNames.push_back(moduleName);
+    }
+    return requiredModuleNames;
+}
+
 bool Frontend::parseGraph(
     std::vector<ModuleName>& buildQueue,
     const ModuleName& root,
@@ -948,14 +907,11 @@ void Frontend::addBuildQueueItems(
         data.environmentScope = getModuleEnvironment(*sourceModule, data.config, frontendOptions.forAutocomplete);
         data.recordJsonLog = FFlag::DebugLuauLogSolverToJson;
 
-        Mode mode = sourceModule->mode.value_or(data.config.mode);
-
-        // in NoCheck mode we only need to compute the value of .cyclic for typeck
         // in the future we could replace toposort with an algorithm that can flag cyclic nodes by itself
         // however, for now getRequireCycles isn't expensive in practice on the cases we care about, and long term
         // all correct programs must be acyclic so this code triggers rarely
         if (cycleDetected)
-            data.requireCycles = getRequireCycles(fileResolver, sourceNodes, sourceNode.get(), mode == Mode::NoCheck);
+            data.requireCycles = getRequireCycles(fileResolver, sourceNodes, sourceNode.get());
 
         data.options = frontendOptions;
 
@@ -987,8 +943,7 @@ void Frontend::checkBuildQueueItem(BuildQueueItem& item)
     else
         mode = sourceModule.mode.value_or(config.mode);
 
-    if (FFlag::LuauSourceModuleUpdatedWithSelectedMode)
-        item.sourceModule->mode = {mode};
+    item.sourceModule->mode = {mode};
     ScopePtr environmentScope = item.environmentScope;
     double timestamp = getTimestamp();
     const std::vector<RequireCycle>& requireCycles = item.requireCycles;
@@ -1357,11 +1312,18 @@ ModulePtr check(
     LUAU_TIMETRACE_ARGUMENT("name", sourceModule.humanReadableName.c_str());
 
     ModulePtr result = std::make_shared<Module>();
+    if (FFlag::LuauStoreSolverTypeOnModule)
+        result->checkedInNewSolver = true;
     result->name = sourceModule.name;
     result->humanReadableName = sourceModule.humanReadableName;
     result->mode = mode;
     result->internalTypes.owningModule = result.get();
     result->interfaceTypes.owningModule = result.get();
+    if (FFlag::LuauReferenceAllocatorInNewSolver)
+    {
+        result->allocator = sourceModule.allocator;
+        result->names = sourceModule.names;
+    }
 
     iceHandler->moduleName = sourceModule.name;
 
@@ -1383,10 +1345,16 @@ ModulePtr check(
     unifierState.counters.iterationLimit = limits.unifierIterationLimit.value_or(FInt::LuauTypeInferIterationLimit);
 
     Normalizer normalizer{&result->internalTypes, builtinTypes, NotNull{&unifierState}};
+    SimplifierPtr simplifier = newSimplifier(NotNull{&result->internalTypes}, builtinTypes);
+    TypeFunctionRuntime typeFunctionRuntime{iceHandler, NotNull{&limits}};
+
+    typeFunctionRuntime.allowEvaluation = sourceModule.parseErrors.empty();
 
     ConstraintGenerator cg{
         result,
         NotNull{&normalizer},
+        NotNull{simplifier.get()},
+        NotNull{&typeFunctionRuntime},
         moduleResolver,
         builtinTypes,
         iceHandler,
@@ -1402,12 +1370,15 @@ ModulePtr check(
 
     ConstraintSolver cs{
         NotNull{&normalizer},
+        NotNull{simplifier.get()},
+        NotNull{&typeFunctionRuntime},
         NotNull(cg.rootScope),
         borrowConstraints(cg.constraints),
         result->name,
         moduleResolver,
         requireCycles,
         logger.get(),
+        NotNull{&dfg},
         limits
     };
 
@@ -1461,12 +1432,31 @@ ModulePtr check(
         switch (mode)
         {
         case Mode::Nonstrict:
-            Luau::checkNonStrict(builtinTypes, iceHandler, NotNull{&unifierState}, NotNull{&dfg}, NotNull{&limits}, sourceModule, result.get());
+            Luau::checkNonStrict(
+                builtinTypes,
+                NotNull{simplifier.get()},
+                NotNull{&typeFunctionRuntime},
+                iceHandler,
+                NotNull{&unifierState},
+                NotNull{&dfg},
+                NotNull{&limits},
+                sourceModule,
+                result.get()
+            );
             break;
         case Mode::Definition:
             // fallthrough intentional
         case Mode::Strict:
-            Luau::check(builtinTypes, NotNull{&unifierState}, NotNull{&limits}, logger.get(), sourceModule, result.get());
+            Luau::check(
+                builtinTypes,
+                NotNull{simplifier.get()},
+                NotNull{&typeFunctionRuntime},
+                NotNull{&unifierState},
+                NotNull{&limits},
+                logger.get(),
+                sourceModule,
+                result.get()
+            );
             break;
         case Mode::NoCheck:
             break;
