@@ -4,8 +4,10 @@
 #include <stddef.h>
 
 // can be used to reconfigure visibility/exports for public APIs
-#ifndef LUACODE_API
-#define LUACODE_API extern
+#ifdef LUACODE_API_EXPORT
+#define LUACODE_API extern "C" __declspec(dllexport)
+#else
+#define LUACODE_API extern "C" __declspec(dllimport)
 #endif
 
 typedef struct lua_CompileOptions lua_CompileOptions;

@@ -2,10 +2,11 @@
 #pragma once
 
 // Can be used to reconfigure visibility/exports for public APIs
-#ifndef LUACODEGEN_API
-#define LUACODEGEN_API extern
+#ifdef LUACODEGEN_API_EXPORT
+#define LUACODEGEN_API extern "C" __declspec(dllexport)
+#else
+#define LUACODEGEN_API extern "C" __declspec(dllimport)
 #endif
-
 typedef struct lua_State lua_State;
 
 // returns 1 if Luau code generator is supported, 0 otherwise

@@ -46,8 +46,10 @@
 #endif
 
 // Can be used to reconfigure visibility/exports for public APIs
-#ifndef LUA_API
-#define LUA_API extern
+#ifdef LUA_API_EXPORT
+#define LUA_API extern "C" __declspec(dllexport)
+#else
+#define LUA_API extern "C" __declspec(dllimport)
 #endif
 
 #define LUALIB_API LUA_API

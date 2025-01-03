@@ -25,12 +25,12 @@ project(Luau LANGUAGES CXX C)
 add_library(Luau.Common INTERFACE)
 add_library(Luau.CLI.lib STATIC)
 add_library(Luau.Ast STATIC)
-add_library(Luau.Compiler STATIC)
+add_library(Luau.Compiler SHARED)
 add_library(Luau.Config STATIC)
 add_library(Luau.Analysis STATIC)
 add_library(Luau.EqSat STATIC)
 add_library(Luau.CodeGen STATIC)
-add_library(Luau.VM STATIC)
+add_library(Luau.VM SHARED)
 add_library(isocline STATIC)
 
 if(LUAU_BUILD_CLI)
@@ -76,6 +76,7 @@ target_include_directories(Luau.Ast PUBLIC Ast/include)
 target_link_libraries(Luau.Ast PUBLIC Luau.Common)
 
 target_compile_features(Luau.Compiler PUBLIC cxx_std_17)
+target_compile_definitions(Luau.Compiler PRIVATE LUACODE_API_EXPORT)
 target_include_directories(Luau.Compiler PUBLIC Compiler/include)
 target_link_libraries(Luau.Compiler PUBLIC Luau.Ast)
 
@@ -93,11 +94,13 @@ target_include_directories(Luau.EqSat PUBLIC EqSat/include)
 target_link_libraries(Luau.EqSat PUBLIC Luau.Common)
 
 target_compile_features(Luau.CodeGen PRIVATE cxx_std_17)
+target_compile_definitions(Luau.CodeGen PRIVATE LUACODEGEN_API_EXPORT)
 target_include_directories(Luau.CodeGen PUBLIC CodeGen/include)
 target_link_libraries(Luau.CodeGen PRIVATE Luau.VM Luau.VM.Internals) # Code generation needs VM internals
 target_link_libraries(Luau.CodeGen PUBLIC Luau.Common)
 
 target_compile_features(Luau.VM PRIVATE cxx_std_11)
+target_compile_definitions(Luau.VM PRIVATE LUA_API_EXPORT)
 target_include_directories(Luau.VM PUBLIC VM/include)
 target_link_libraries(Luau.VM PUBLIC Luau.Common)
 
