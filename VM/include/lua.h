@@ -105,6 +105,7 @@ typedef int lua_Integer;
 // unsigned integer type
 typedef unsigned lua_Unsigned;
 
+
 /*
 ** state manipulation
 */
